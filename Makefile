@@ -7,10 +7,13 @@ all: $(TARGETS)
 %.o: %.c 
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-nimd: nimd.o
+$(TARGETS): nimd.o protocol.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
 	rm -rf $(TARGETS) *.o *.a *.dylib *.dSYM
 
 .PHONY: all clean
+
+nimd.o: nimd.c protocol.h
+protocol.o: protocol.c protocol.h
