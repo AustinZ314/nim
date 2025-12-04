@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200112L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,8 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <errno.h>
+#include <poll.h>
+#include <netdb.h>
 
 #include "protocol.h"
 
@@ -113,6 +116,168 @@ void send_message(int fd, char *type, char *args) {
     write(fd, buf, strlen(buf));
 }
 
+void run_game(Player p1, Player p2) {
+    int piles[5] = {1, 3, 5, 7, 9}; 
+    int turn = 0; // 0 is p1, 1 is p2
+    int running = 1;
+
+    // send the players the NAME message with their opponent's name
+    char args[MAX_LEN + 1];
+    snprintf(args, sizeof(args), "1|%s", p2.name);
+    send_message(p1.fd, "NAME", args);
+
+    snprintf(args, sizeof(args), "2|%s", p1.name);
+    send_message(p2.fd, "NAME", args);
+
+    // use poll() for extra credit logic
+    struct pollfd fds[2];
+    fds[0].fd = p1.fd;
+    fds[1].fd = p2.fd;
+    fds[0].events = POLLIN;
+    fds[1].events = POLLIN;
+
+    while(running) {
+        char board[12];
+        snprintf(board, sizeof(board), "%d|%d %d %d %d %d", turn + 1, piles[0], piles[1], piles[2], piles[3], piles[4]);
+
+        send_message(p1.fd, "PLAY", board);
+        send_message(p2.fd, "PLAY", board);
+
+        int response = poll(fds, 2, -1);
+        if(response < 0) {
+            if(errno == EINTR) continue;
+            break;
+        }
+
+        for(int i = 0; i < 2; i++) {
+            if(fds[i].revents & POLLIN) {
+                int cur_player;
+                if(i == turn) cur_player = 1;
+                else cur_player = 0;
+
+                int fd;
+                int other;
+                if(i == 0) {
+                    fd = p1.fd;
+                    other = p2.fd;
+                }
+                else {
+                    fd = p2.fd;
+                    other = p1.fd;
+                }
+
+                Message m;
+                int status = parse_message(fd, &m);
+                if(status == -2) { // client disconnected
+                    printf("(%s vs. %s) Game Over: %s forfeited by disconnecting.\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name);
+                    char final_board[12];
+                    snprintf(final_board, sizeof(final_board), "%d %d %d %d %d", piles[0], piles[1], piles[2], piles[3], piles[4]);
+                    
+                    char over_args[MAX_LEN + 1];
+                    snprintf(over_args, sizeof(over_args), "%d|%s|Forfeit", 2 - i, final_board);
+
+                    send_message(other, "OVER", over_args);
+                    running = 0;
+                    break;
+                } else if(status == -1) {
+                    printf("(%s vs. %s) Game Over: %s forfeited due to invalid message.\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name);
+                    send_message(fd, "FAIL", "10 Invalid"); // 10 Invalid, so close connection and forfeit
+                    char final_board[12];
+                    snprintf(final_board, sizeof(final_board), "%d %d %d %d %d", piles[0], piles[1], piles[2], piles[3], piles[4]);
+
+                    char over_args[MAX_LEN + 1];
+                    snprintf(over_args, sizeof(over_args), "%d|%s|Forfeit", 2 - i, final_board);
+
+                    send_message(other, "OVER", over_args);
+                    running = 0;
+                    break;
+                }
+
+                // check for 23 Already Open error
+                if(strncmp(m.type, "OPEN", 4) == 0) {
+                    printf("(%s vs. %s) Game Over: %s forfeited by sending OPEN again.\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name);
+                    send_message(fd, "FAIL", "23 Already Open");
+                    char final_board[12];
+                    snprintf(final_board, sizeof(final_board), "%d %d %d %d %d", piles[0], piles[1], piles[2], piles[3], piles[4]);
+
+                    char over_args[MAX_LEN + 1];
+                    snprintf(over_args, sizeof(over_args), "%d|%s|Forfeit", 2 - i, final_board);
+
+                    send_message(other, "OVER", over_args);
+                    running = 0;
+                    break;
+                }
+
+                // check for 31 Impatient error for extra credit
+                if(!cur_player && strncmp(m.type, "MOVE", 4) == 0) {
+                    send_message(fd, "FAIL", "31 Impatient");
+                    continue;
+                }
+
+                // if the player makes a move during their turn
+                if(cur_player && strncmp(m.type, "MOVE", 4) == 0) {
+                    if(m.field_count != 2) { // check to be safe
+                        send_message(fd, "FAIL", "10 Invalid");
+                        running = 0;
+                        break;
+                    }
+
+                    int ind = atoi(m.fields[0]);
+                    int stones = atoi(m.fields[1]);
+
+                    // check if pile index is valid
+                    if(ind < 0 || ind > 4) {
+                        send_message(fd, "FAIL", "32 Pile Index");
+                        continue;
+                    }
+
+                    // check if the number of stones is valid
+                    if(stones < 1 || stones > piles[ind]) {
+                        send_message(fd, "FAIL", "33 Quantity");
+                        continue;
+                    }
+
+                    piles[ind] -= stones;
+                    printf("(%s vs. %s) Player %d's Move: took %d stones from pile %d\n", p1.name, p2.name, i + 1, stones, ind);
+
+                    // check if the game is over
+                    int sum = 0;
+                    for(int j = 0; j < 5; j++) {
+                        sum += piles[j];
+                    }
+
+                    if(sum == 0) {
+                        char over_message[MAX_LEN + 1];
+                        snprintf(over_message, sizeof(over_message), "%d|0 0 0 0 0|", i + 1);
+                        send_message(p1.fd, "OVER", over_message);
+                        send_message(p2.fd, "OVER", over_message);
+                        running = 0;
+                        printf("(%s vs. %s) Game Over: %s wins\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name);
+                    } else {
+                        turn = 1 - turn;
+                    }
+                } else if(cur_player) { // if the player sent a message that isnt MOVE
+                    printf("(%s vs. %s) Game Over: %s forfeited due to invalid message type.\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name);
+                    send_message(fd, "FAIL", "10 Invalid");
+
+                    char final_board[12];
+                    snprintf(final_board, sizeof(final_board), "%d %d %d %d %d", piles[0], piles[1], piles[2], piles[3], piles[4]);
+
+                    char over_args[MAX_LEN + 1];
+                    snprintf(over_args, sizeof(over_args), "%d|%s|Forfeit", 2 - i, final_board);
+
+                    send_message(other, "OVER", over_args);
+                    running = 0;
+                    break;
+                }
+            }
+        }
+    }
+
+    close(p1.fd);
+    close(p2.fd);
+}
+
 // accept OPEN from client and respond with WAIT
 int setup_handshake(int fd, char *name_buf) {
     Message m;
@@ -122,7 +287,18 @@ int setup_handshake(int fd, char *name_buf) {
     if(status == -2) {
         close(fd);
         return -1;
-    } else if(status == -1 || strncmp(m.type, "OPEN", 4) != 0) { // 10 Invalid
+    } else if(status == -1) { // 10 Invalid
+        send_message(fd, "FAIL", "10 Invalid");
+        close(fd);
+        return -1;
+    }
+
+    // 24 Not Playing because NAME hasnt been received yet
+    if(strncmp(m.type, "MOVE", 4) == 0) {
+        send_message(fd, "FAIL", "24 Not Playing");
+        close(fd);
+        return -1;
+    } else if(strncmp(m.type, "OPEN", 4) != 0) { // if they send something that isnt OPEN or MOVE
         send_message(fd, "FAIL", "10 Invalid");
         close(fd);
         return -1;
@@ -203,56 +379,105 @@ int main(int argc, char **argv) {
     // loop to accept connections
     while(1) {
         check_zombies();
+        
+        // make it so that we can respond to messages as soon as they arrive for the waiting player
+        int num_fds = 1;
+        struct pollfd fds[2];
+        fds[0].fd = server_fd;
+        fds[0].events = POLLIN;
 
-        struct sockaddr_in remote;
-        socklen_t remote_len = sizeof(remote);
+        if(unmatched_player != NULL) {
+            fds[1].fd = unmatched_player->fd;
+            fds[1].events = POLLIN;
+            num_fds = 2;
+        }
 
-        int new_fd = accept(server_fd, (struct sockaddr *) &remote, &remote_len);
-        if(new_fd < 0) {
+        int response = poll(fds, num_fds, -1);
+        if(response < 0) {
             if(errno == EINTR) continue;
-            perror("accept");
-            continue;
+            perror("poll");
+            break;
         }
 
-        // check if any child processes ended to update the list of current games
-        check_zombies();
+        // check if the waiting player sent any messages while waiting
+        if(num_fds == 2 && (fds[1].revents & POLLIN)) {
+            Message m;
+            int status = parse_message(unmatched_player->fd, &m);
 
-        printf("Incoming connection accepted: %d\n", new_fd);
-
-        char player_name[73];
-        if(setup_handshake(new_fd, player_name) < 0) {
-            printf("Handshake failed: %d\n", new_fd);
-            continue;
-        }
-
-        // no player waiting, so make this client wait
-        if(unmatched_player == NULL) {
-            unmatched_player = malloc(sizeof(Player));
-            unmatched_player->fd = new_fd;
-            strcpy(unmatched_player->name, player_name);
-        } else {
-            // a player is already waiting, so a game can start now
-            pid_t pid = fork();
-            if(pid == 0) {
-                close(server_fd);
-
-                Player p1 = *unmatched_player;
-                Player p2 = {new_fd};
-                strcpy(p2.name, player_name);
-                free(unmatched_player);
-                
-                run_game(p1, p2);
-                exit(0); // end the child process once the game ends
-            } else if(pid > 0) {
-                // close the clients in the parent process (theyre running in child process now)
-                add_game(pid, unmatched_player->name, player_name);
-                close(unmatched_player->fd);
-                close(new_fd);
-                free(unmatched_player);
-                unmatched_player = NULL;
+            if(status == -2) {
+                printf("Waiting player %s (fd: %d) disconnected.\n", unmatched_player->name, unmatched_player->fd);
+            } else if(status == -1){
+                send_message(unmatched_player->fd, "FAIL", "10 Invalid");
+                printf("Closing connection with player %s (fd: %d) due to invalid message.\n", unmatched_player->name, unmatched_player->fd);
             } else {
-                perror("fork");
-                close(new_fd);
+                if(strncmp(m.type, "MOVE", 4) == 0) {
+                    send_message(unmatched_player->fd, "FAIL", "24 Not Playing");
+                } else if(strncmp(m.type, "OPEN", 4) == 0) {
+                    send_message(unmatched_player->fd, "FAIL", "23 Already Open");
+                } else {
+                    send_message(unmatched_player->fd, "FAIL", "10 Invalid");
+                }
+                printf("Closing connection with player %s (fd: %d) due to early %s message.\n", unmatched_player->name, unmatched_player->fd, m.type);
+            }
+
+            close(unmatched_player->fd);
+            free(unmatched_player);
+            unmatched_player = NULL;
+        }
+
+        if(fds[0].revents & POLLIN) {
+            struct sockaddr_in remote;
+            socklen_t remote_len = sizeof(remote);
+
+            int new_fd = accept(server_fd, (struct sockaddr *) &remote, &remote_len);
+            if(new_fd < 0) {
+                if(errno == EINTR) continue;
+                perror("accept");
+                continue;
+            }
+
+            // check if any child processes ended to update the list of current games
+            check_zombies();
+
+            printf("Incoming connection accepted: %d\n", new_fd);
+
+            char player_name[73];
+            if(setup_handshake(new_fd, player_name) < 0) {
+                printf("Handshake failed: %d\n", new_fd);
+                continue;
+            }
+
+            // no player waiting, so make this client wait
+            if(unmatched_player == NULL) {
+                unmatched_player = malloc(sizeof(Player));
+                unmatched_player->fd = new_fd;
+                strcpy(unmatched_player->name, player_name);
+                printf("Player %s (fd: %d) is waiting.\n", player_name, new_fd);
+            } else {
+                // a player is already waiting, so a game can start now
+                pid_t pid = fork();
+                if(pid == 0) {
+                    close(server_fd);
+
+                    Player p1 = *unmatched_player;
+                    Player p2 = {new_fd};
+                    strcpy(p2.name, player_name);
+                    free(unmatched_player);
+
+                    printf("Game starting between %s and %s.\n", p1.name, p2.name);
+                    run_game(p1, p2);
+                    exit(0); // end the child process once the game ends
+                } else if(pid > 0) {
+                    // close the clients in the parent process (theyre running in child process now)
+                    add_game(pid, unmatched_player->name, player_name);
+                    close(unmatched_player->fd);
+                    close(new_fd);
+                    free(unmatched_player);
+                    unmatched_player = NULL;
+                } else {
+                    perror("fork");
+                    close(new_fd);
+                }
             }
         }
     }
