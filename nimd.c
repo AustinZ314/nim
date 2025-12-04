@@ -99,7 +99,7 @@ void check_zombies() {
 
 // send a message from the server to a client
 void send_message(int fd, char *type, char *args) {
-    char buf[MAX_LEN + 1];
+    char buf[256]; // have some extra space to be safe
     char body[MAX_LEN + 1];
 
     // add the type and arguments to the message
@@ -137,7 +137,7 @@ void run_game(Player p1, Player p2) {
     fds[1].events = POLLIN;
 
     while(running) {
-        char board[12];
+        char board[100]; // extra space to be safe
         snprintf(board, sizeof(board), "%d|%d %d %d %d %d", turn + 1, piles[0], piles[1], piles[2], piles[3], piles[4]);
 
         send_message(p1.fd, "PLAY", board);

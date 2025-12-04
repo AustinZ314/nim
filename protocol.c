@@ -1,4 +1,7 @@
 #include <ctype.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define MAX_LEN 104
 
