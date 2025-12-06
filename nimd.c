@@ -129,6 +129,12 @@ void run_game(Player p1, Player p2) {
     snprintf(args, sizeof(args), "2|%s", p1.name);
     send_message(p2.fd, "NAME", args);
 
+    // send the PLAY messages to start the game
+    char board[100]; // extra space to be safe
+    snprintf(board, sizeof(board), "%d|%d %d %d %d %d", turn + 1, piles[0], piles[1], piles[2], piles[3], piles[4]);
+    send_message(p1.fd, "PLAY", board);
+    send_message(p2.fd, "PLAY", board);
+
     // use poll() for extra credit logic
     struct pollfd fds[2];
     fds[0].fd = p1.fd;
@@ -137,12 +143,6 @@ void run_game(Player p1, Player p2) {
     fds[1].events = POLLIN;
 
     while(running) {
-        char board[100]; // extra space to be safe
-        snprintf(board, sizeof(board), "%d|%d %d %d %d %d", turn + 1, piles[0], piles[1], piles[2], piles[3], piles[4]);
-
-        send_message(p1.fd, "PLAY", board);
-        send_message(p2.fd, "PLAY", board);
-
         int response = poll(fds, 2, -1);
         if(response < 0) {
             if(errno == EINTR) continue;
@@ -238,7 +238,7 @@ void run_game(Player p1, Player p2) {
                     }
 
                     piles[ind] -= stones;
-                    printf("(%s vs. %s) Player %d's Move: took %d stones from pile %d\n", p1.name, p2.name, i + 1, stones, ind);
+                    printf("(%s vs. %s) %s's Move: took %d stones from pile %d\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name, stones, ind);
 
                     // check if the game is over
                     int sum = 0;
@@ -255,6 +255,9 @@ void run_game(Player p1, Player p2) {
                         printf("(%s vs. %s) Game Over: %s wins\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name);
                     } else {
                         turn = 1 - turn;
+                        snprintf(board, sizeof(board), "%d|%d %d %d %d %d", turn + 1, piles[0], piles[1], piles[2], piles[3], piles[4]);
+                        send_message(p1.fd, "PLAY", board);
+                        send_message(p2.fd, "PLAY", board);
                     }
                 } else if(cur_player) { // if the player sent a message that isnt MOVE
                     printf("(%s vs. %s) Game Over: %s forfeited due to invalid message type.\n", p1.name, p2.name, (i == 0) ? p1.name : p2.name);
