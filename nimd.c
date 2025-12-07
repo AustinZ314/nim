@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <netdb.h>
+#include <ctype.h>
 
 #include "protocol.h"
 
@@ -243,7 +244,7 @@ void run_game(Player p1, Player p2) {
                     // check if the game is over
                     int sum = 0;
                     for(int j = 0; j < 5; j++) {
-                        sum += piles[j];
+                        sum += piles[j]; // 0|25|NAME|1|Alice Opponentson|
                     }
 
                     if(sum == 0) {
@@ -281,6 +282,16 @@ void run_game(Player p1, Player p2) {
     close(p2.fd);
 }
 
+// check if the name is all ascii and not control characters
+int ascii_name(char *name) {
+    for(int i = 0; name[i] != '\0'; i++) {
+        if(!isprint((unsigned char) name[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 // accept OPEN from client and respond with WAIT
 int setup_handshake(int fd, char *name_buf) {
     Message m;
@@ -316,6 +327,12 @@ int setup_handshake(int fd, char *name_buf) {
 
     if(strlen(m.fields[0]) > 72) {
         send_message(fd, "FAIL", "21 Long Name");
+        close(fd);
+        return -1;
+    }
+
+    if(!ascii_name(m.fields[0])) {
+        send_message(fd, "FAIL", "10 Invalid");
         close(fd);
         return -1;
     }

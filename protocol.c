@@ -37,12 +37,22 @@ int read_field(int fd, char *buf, int num_bytes, int expected_bars) {
 int parse_message(int fd, Message *msg) {
     // read the protocol version and check if its valid
     char version[2];
-    if(read_field(fd, version, 2, 1) < 0) return -2; // client disconnected
+    int res = read_field(fd, version, 2, 1);
+    if(res == -1) {
+        return -1; // 10 Invalid
+    } else if(res == -2) {
+        return -2; // client disconnected
+    }
     if(version[0] != '0' || version[1] != '|') return -1; // 10 Invalid error
 
     // read the message length and check if its valid
     char length[3];
-    if(read_field(fd, length, 3, 1) < 0) return -2; // client disconnected
+    res = read_field(fd, length, 3, 1);
+    if(res == -1) {
+        return -1; // 10 Invalid
+    } else if(res == -2) {
+        return -2; // client disconnected
+    }
     if(!isdigit(length[0]) || !isdigit(length[1]) || length[2] != '|') return -1; // 10 Invalid error
     
     char convert[3] = {length[0], length[1], '\0'};
@@ -50,7 +60,12 @@ int parse_message(int fd, Message *msg) {
     if(real_length < 0 || real_length > (MAX_LEN - 10)) return -1; // 10 Invalid error
 
     // read the message type and check if its valid
-    if(read_field(fd, msg->type, 5, 1) < 0) return -2; // client disconnected
+    res = read_field(fd, msg->type, 5, 1);
+    if(res == -1) {
+        return -1;
+    } else if(res == -2) {
+        return -2; // client disconnected
+    }
     if(msg->type[4] != '|') return -1; // 10 Invalid error
     msg->type[4] = '\0';
 
@@ -62,7 +77,12 @@ int parse_message(int fd, Message *msg) {
     else return -1; // 10 Invalid error
 
     // read the body of the message and check if its valid
-    if(read_field(fd, msg->body, real_length, expected_fields) < 0) return -2; // client disconnected
+    res = read_field(fd, msg->body, real_length, expected_fields);
+    if(res == -1) {
+        return -1;
+    } else if(res == -2) {
+        return -2; // client disconnected
+    }
     msg->body[real_length] = '\0';
 
     if(msg->body[real_length - 1] != '|') return -1; // 10 Invalid error
