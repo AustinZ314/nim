@@ -54,43 +54,43 @@ All of the programs that we use to test nimd are in the `clients/` directory, wh
 Send `0|12|OPEN|Amanda|` and `0|12|OPEN|Austin|` in two rawc terminals. Then send a valid move such as `0|09|MOVE|2|3|`.
 **Result:** Server processes all messages correctly.
 
-### **Test 6 — MOVE Out of Turn → FAIL 31**
+### **Test 6 — MOVE Out of Turn (FAIL 31)**
 
 **Requirement:** Sending MOVE during opponent’s turn should fail without closing connection.
 **Description:** Send `MOVE` before receiving a PLAY message for that player.
 **Result:** Server returns `FAIL|31 Impatient|` and keeps the connection open.
 
-### **Test 7 — Invalid Message Format → FAIL 10**
+### **Test 7 — Invalid Message Format (FAIL 10)**
 
 **Requirement:** Server must detect malformed messages.
 **Description:** Send any incorrectly formatted NGP frame.
 **Result:** Server returns `FAIL|10 Invalid|` and closes connection.
 
-### **Test 8 — Long Player Name → FAIL 21**
+### **Test 8 — Long Player Name (FAIL 21)**
 
 **Requirement:** Names longer than 72 characters must be rejected.
 **Description:** Send an OPEN with 73 'A's.
 **Result:** Server returns `FAIL|21 Long Name|` and closes connection.
 
-### **Test 9 — Second OPEN → FAIL 23**
+### **Test 9 — Second OPEN (FAIL 23)**
 
 **Requirement:** Client cannot send OPEN twice.
 **Description:** Send `OPEN|Alice|` and then send another OPEN.
 **Result:** Server returns `FAIL|23 Already Open|` and closes connection.
 
-### **Test 10 — MOVE Before NAME → FAIL 24**
+### **Test 10 — MOVE Before NAME (FAIL 24)**
 
 **Requirement:** MOVE cannot be sent before NAME.
 **Description:** Send `OPEN|Alice|` then immediately send a MOVE.
 **Result:** Server returns `FAIL|24 Not Playing|` and closes connection.
 
-### **Test 11 — Invalid Stone Quantity → FAIL 33**
+### **Test 11 — Invalid Stone Quantity (FAIL 33)**
 
 **Requirement:** Removing too many stones (or invalid amount) must be rejected.
 **Description:** With board `1 3 1 7 9`, send `MOVE|2|4|`.
 **Result:** Server returns `FAIL|33 Quantity|` and keeps the connection open.
 
-### **Test 12 — Invalid Pile Index → FAIL 32**
+### **Test 12 — Invalid Pile Index (FAIL 32)**
 
 **Requirement:** Pile index must be 1–5.
 **Description:** Send a move selecting an out-of-range pile.
