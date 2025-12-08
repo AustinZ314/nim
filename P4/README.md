@@ -17,9 +17,9 @@ Our test plan focuses on validating the correctness and robustness of nimd. Our 
 ### Description of Testing Files
 All of the programs that we use to test nimd are in the provided `clients/` directory. This includes:
 - `testc`, a basic client that prevents the user from making illegal moves
-    - Usage: testc <host> <port> <name>
+    - Usage: testc host port name
 - `rawc`, a client that allows the user to send arbitrary strings to the server to test error handling
-    - Usage: rawc <host> <port>
+    - Usage: rawc host port
 
 ### **TESTC Tests**
 
